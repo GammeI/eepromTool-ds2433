@@ -1,13 +1,5 @@
 #!/usr/bin/python
-import argparse, subprocess, sys, os
-import serial, time, binascii, os
-
-parser = argparse.ArgumentParser(description='These are some simple scripts to interface a oneWire eeprom to a computer using a arduino Mirror..')
-
-parser.add_argument("-s", "--save", help="Save the eeprom to disk. (Default action)", action="store_true")
-parser.add_argument("-l", "--load", help="Restore the eeprom to the oldest available image.", action="store_true")
-parser.add_argument("-t", "--test", help="Test eeprom (and arduino/connections etc).", action="store_true")
-parser.add_argument("-c", "--clear", help="Clear the flash write all zeros.")
+import argparse, subprocess, sys, os, getopt, serial, time, binascii
 
 def readROM():
     sp.write("r")
@@ -91,10 +83,35 @@ def write2433(flash):
 
     print "Write Result:", repr(result)
 
-    if result == "t":
+    if result == "t\r\n":
         print("Success")
     else:
         print("Failure!")
+
+
+def flashRom(path):
+    waitForChip()
+    currentRom = readROM()
+    print("Detected Chip with ROM: " + binascii.hexlify(currentRom))
+	flashPath = path
+    print("Attempting to flash with image from " + flashPath)
+    FlashData = open(path).read()
+    write2433(FlashData)
+
+    print("Verifying write")
+    reread = readFlash()
+    if reread != FlashData:
+        print "Write failure!  Aborting."
+        print "First wrong offset:"
+
+        print type(FlashData), len(FlashData)
+        print type(reread), len(reread)
+        for n, (d1, d2) in enumerate(zip(FlashData, reread)):
+            if d1 != d1:
+                print "Broken at", n, binascii.hexlify(d1), binascii.hexlify(d2)
+    else:
+        print "Write successful."
+
 
 def writeOldestToChip():
     waitForChip()
@@ -140,30 +157,60 @@ else:
     possibleSerialPorts = ["COM1", "COM2", "COM3", "COM4"]
 
 
-
 spAddy = os.path.join("/dev", possibleSerialPorts[0])
 print( "Using serial port: " + spAddy)
-sp = serial.Serial(spAddy, baudrate=9600, timeout=3)
+sp = serial.Serial(spAddy, baudrate=115200, timeout=3)
 sp.flushInput()
 
-args = parser.parse_args()
 
-if args.test:
-    waitForChip()
-    print("Doing Echo Test")
-    echo()
-    print("Reading ROM ID:",)
-    print(binascii.hexlify(readROM()))
-    sys.exit(0)
+def help():
+	      	print("""\
+Usage: tool.py [OPTIONS]
+		-h				Display this usage message
+		-s				Backup rom
+		-l				Load rom file from backup
+		-t				Test for eeprom connection
+		-c				Clear eeprom by writing zeroes
+		-f <PATH.bin>			Flash romfile
+		""")
+		
+    
+def main(argv):
+   try:
+      opts, args = getopt.getopt(argv,"hsltcf:",["--save","--load","--test","--clear","--flash"])
+   except getopt.GetoptError:
+      help()
+      sys.exit(2)
+   for opt, arg in opts:
+      if opt == '-h':
+		help()
+		sys.exit()
+      elif opt in ("-s", "--save"):
+		print("Dumping eeprom")
+		dump2433()		
+      elif opt in ("-l", "--load"):
+		print("Backing up eeprom")
+		dump2433()
+		# Flush the input stream b/c these are independant interations
+		sp.flushInput()
+		print("Flashing oldest stored")
+		writeOldestToChip()
+      elif opt in ("-t", "--test"):
+		waitForChip()
+		print("Doing Echo Test")
+		echo()
+		print("Reading ROM ID:",)
+		print(binascii.hexlify(readROM()))
+		sys.exit(0)
+      elif opt in ("-c", "--clear"):
+      	clearFlash()	
+      elif opt in ("-f", "--flash"):
+        flashRom(arg)
 
-if args.load:
-    print("Backing up eeprom")
-    dump2433()
 
-    # Flush the input stream b/c these are independant interations
-    sp.flushInput()
-    print("Flashing oldest stored")
-    writeOldestToChip()
-else:
-    print("Dumping eeprom")
-    dump2433()
+if __name__ == "__main__":
+   main(sys.argv[1:])
+
+
+
+    
